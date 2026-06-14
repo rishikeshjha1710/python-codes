@@ -1,76 +1,139 @@
-import smtplib
-from tkinter import *
+# ALL Imports
+import time
+from tkinter.ttk import *
+import tkinter as tk
+from requests import get, HTTPError, ConnectionError
+from re import findall
+from urllib.parse import unquote
+from threading import Thread
+import queue
+from queue import Empty
+
+def Invalid_Url():
+    """ Sets Status bar label to error message """
+    Status["text"] = "Invalid URL..."
+    Status["fg"] = "red"
+
+def get_downloadlink(url):
+
+    url = url.replace("www", "mbasic")
+    try:
+        r = get(url, timeout=5, allow_redirects=True)
+        if r.status_code != 200:
+            raise HTTPError
+        a = findall("/video_redirect/", r.text)
+        if len(a) == 0:
+            print("[!] Video Not Found...")
+            exit(0)
+        else:
+            return unquote(r.text.split("?src=")[1].split('"')[0])
+    except (HTTPError, ConnectionError):
+        print("[x] Invalid URL")
+        exit(1)
 
 
-def send_message():
-    
-    address_info = address.get()
-    
-    email_body_info = email_body.get()
 
-    sender_info = sender_address.get()
+def Download_vid():
 
-    password_info = password.get()
-    
-    server = smtplib.SMTP('smtp.gmail.com',587)
-    
-    server.starttls()
-    
-    server.login(sender_info,password_info)
-    
-    print("Login successful")
-    
-    server.sendmail(sender_info,address_info,email_body_info)
-    
-    print("Message sent")
-    
-    address_entry.delete(0,END)
-    email_body_entry.delete(0,END)
-    password_entry.delete(0,END)
-    sender_address_entry.delete(0,END)
-    
+    # Validates Link and download Video
+    global Url_Val
+    url=Url_Val.get()
 
-gui = Tk()
+    Status["text"]="Downloading"
+    Status["fg"]="green"
 
-gui.geometry("500x500")
 
-gui.title("Email Sender App")
+    # Validating Input
 
-heading = Label(text="Email Sender App",bg="yellow",fg="black",font="10",width="500",height="3")
+    if not "www.facebook.com" in url:
+        Invalid_Url()
+        return
 
-heading.pack()
-gui.configure(background = "light blue")
+    link=get_downloadlink(url)
 
-sender_address_field = Label(text="Sender's Email :")
-sender_address_field.place(x=15,y=70)
+    start_downloading()
 
-sender_address = StringVar()
-sender_address_entry = Entry(textvariable=sender_address,width="30")
-sender_address_entry.place(x=15,y=100)
+    download_thread=VideoDownload(link)
+    download_thread.start()
+    monitor(download_thread)
 
-sender_password_field = Label(text="Sender's Password :")
-sender_password_field.place(x=15,y=140)
 
-password = StringVar()
-password_entry = Entry(textvariable=password,width="30")
-password_entry.place(x=15,y=170)
 
-address_field = Label(text="Recipient Email :")
-address_field.place(x=15,y=210)
+def monitor( download_thread):
+    """ Monitor the download thread """
+    if download_thread.is_alive():
 
-address = StringVar()
-address_entry = Entry(textvariable=address,width="30")
-address_entry.place(x=15,y=240)
+        try:
+            bar["value"]=queue.get(0)
+            ld_window.after(10, lambda: monitor(download_thread))
+        except Empty:
+            pass
 
-email_body_field = Label(text="Message :")
-email_body_field.place(x=15,y=280)
 
-email_body = StringVar()
-email_body_entry = Entry(textvariable=email_body,width="30")
-email_body_entry.place(x=15,y=320,height="30")
 
-button = Button(gui,text="Send Message",command=send_message,width="30",height="2",bg="grey")
+class VideoDownload(Thread):
 
-button.place(x=15,y=400)
+    def __init__(self, url):
+        super().__init__()
 
-mainloop()
+        self.url = url
+
+    def run(self):
+        """ download video"""
+
+        # save the picture to a file
+        block_size = 1024  # 1kB
+        r = get(self.url, stream=True)
+        total_size = int(r.headers.get("content-length"))
+
+        with open('video.mp4', 'wb') as file:
+            totaldata=0;
+            for data in r.iter_content(block_size):
+                totaldata+=len(data)
+                per_downloaded=totaldata*100/total_size
+                queue.put(per_downloaded)
+                bar['value'] = per_downloaded
+                file.write(data)
+                time.sleep(0.01)
+            file.close()    
+            print("Download Finished")
+
+        print("Download Complete !!!")
+        Status["text"] = "Finished!!"
+        Status["fg"] = "green"
+
+
+
+#start download
+def start_downloading():
+   bar["value"]=0;
+
+# GUI
+
+ld_window=tk.Tk()
+ld_window.title("Facebook Video Downloader")
+ld_window.geometry("400x300")
+
+# Label for URL Input
+input_label= tk.Label(ld_window,text="Enter Facebook Video URL:")
+input_label.pack()
+
+# Input of URL
+Url_Val = tk.StringVar()
+Url_Input = tk.Entry(ld_window, textvariable=Url_Val, font=("Calibri", 9))
+Url_Input.place( x=25,y=50, width=350)
+
+# Button for Download
+Download_button = tk.Button(ld_window, text="Download", font=("Calibri", 9), command=Download_vid)
+Download_button.place(x=100, y=100, width=200)
+
+# Progress Bar
+bar = Progressbar(ld_window, length=350, style='grey.Horizontal.TProgressbar',mode='determinate')
+bar.place(y=200,width=350,x=25)
+
+queue=queue.Queue()
+# Text for Status of Downloading
+Status = tk.Label(ld_window, text="Hello!! :D", fg="blue", font=("Calibri", 9), bd=1, relief=tk.SUNKEN, anchor=tk.W, padx=3)
+Status.pack(side=tk.BOTTOM, fill=tk.X)
+
+ld_window.mainloop() 
